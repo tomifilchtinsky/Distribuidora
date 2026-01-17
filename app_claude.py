@@ -8,6 +8,50 @@ import time
 # Configuración inicial
 st.set_page_config(page_title="El Galpón - Gestión", layout="wide", page_icon="🍻")
 
+
+
+
+
+# ==========================================================
+# 🔐 EL PORTERO (SISTEMA DE LOGIN SIMPLE)
+# ==========================================================
+def check_password():
+    """Retorna True si el usuario ingresó la clave correcta."""
+
+    def password_entered():
+        """Chequea si la clave coincide con la de los Secrets."""
+        if st.session_state["password"] == st.secrets["general"]["admin_password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Borramos la clave de memoria por seguridad
+        else:
+            st.session_state["password_correct"] = False
+
+    # Si ya está logueado, pase chamigo
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Si no, mostramos el cuadro de contraseña
+    st.title("🔒 Sistema de Gestión - Acceso Restringido")
+    st.text_input(
+        "Ingresá la contraseña de administrador:", 
+        type="password", 
+        on_change=password_entered, 
+        key="password"
+    )
+    
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+        st.error("⛔ Clave incorrecta, probá de nuevo.")
+        
+    return False
+
+# SI EL PORTERO DICE QUE NO, PARAMOS TODO ACÁ
+if not check_password():
+    st.stop()
+
+
+
+
+
 # --- CONEXIÓN ---
 @st.cache_resource
 def get_engine():
