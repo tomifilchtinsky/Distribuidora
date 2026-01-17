@@ -13,41 +13,45 @@ st.set_page_config(page_title="El Galpón - Gestión", layout="wide", page_icon=
 
 
 # ==========================================================
-# 🔐 EL PORTERO (SISTEMA DE LOGIN SIMPLE)
+# 🔐 EL PORTERO (SISTEMA DE LOGIN CON FORMULARIO)
 # ==========================================================
 def check_password():
     """Retorna True si el usuario ingresó la clave correcta."""
 
-    def password_entered():
-        """Chequea si la clave coincide con la de los Secrets."""
-        if st.session_state["password"] == st.secrets["general"]["admin_password"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Borramos la clave de memoria por seguridad
-        else:
-            st.session_state["password_correct"] = False
-
-    # Si ya está logueado, pase chamigo
+    # 1. Si ya validó antes, pase nomás
     if st.session_state.get("password_correct", False):
         return True
 
-    # Si no, mostramos el cuadro de contraseña
-    st.title("🔒 Sistema de Gestión - Acceso Restringido")
-    st.text_input(
-        "Ingresá la contraseña de administrador:", 
-        type="password", 
-        on_change=password_entered, 
-        key="password"
-    )
+    # 2. Si no, mostramos el formulario de login
+    st.title("🔒 Acceso Restringido")
     
-    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("⛔ Clave incorrecta, probá de nuevo.")
+    with st.form("login_form"):
+        st.markdown("##### Ingresá la contraseña para acceder al sistema")
         
+        # El input de contraseña
+        password_input = st.text_input(
+            "Contraseña", 
+            type="password", 
+            placeholder="Escribí la clave acá..."
+        )
+        
+        # El botón de Entrar
+        submit_button = st.form_submit_button("🚀 Entrar al Sistema")
+
+        if submit_button:
+            # Validamos solo cuando aprieta el botón
+            if password_input == st.secrets["general"]["admin_password"]:
+                st.session_state["password_correct"] = True
+                st.rerun()  # Recargamos para que entre de una
+            else:
+                st.error("⛔ Clave incorrecta. Probá de nuevo.")
+
+    # Frenamos todo hasta que se loguee
     return False
 
 # SI EL PORTERO DICE QUE NO, PARAMOS TODO ACÁ
 if not check_password():
     st.stop()
-
 
 
 
