@@ -1694,8 +1694,7 @@ with tab7:
     if df_marcas.empty:
         st.warning("⚠️ No podés cargar productos porque no hay MARCAS cargadas. Creá una marca arriba a la izquierda.")
     else:
-        # IMPORTANTE: Sacamos el 'clear_on_submit=True' un ratito para que no te borre 
-        # las cosas si le errás al Enter y te falta un dato.
+        # Sacamos el clear_on_submit para que no borre si hay error
         with st.form("form_alta_producto", clear_on_submit=False):
             col_a, col_b = st.columns(2)
             nombre_prod = col_a.text_input("Nombre del Producto (Ej: Coca Cola 1.5L)")
@@ -1705,41 +1704,43 @@ with tab7:
                                          format_func=lambda x: df_marcas[df_marcas['id_marca']==x]['nombre'].values[0])
             
             col_c, col_d, col_e = st.columns(3)
-            precio_vta = col_c.number_input("Precio de Venta ($)", min_value=0.0)
-            costo_ref = col_d.number_input("Costo de compra ($)", min_value=0.0)
+            precio_vta = col_c.number_input("Precio de Venta Unitario ($)", min_value=0.0)
+            costo_ref = col_d.number_input("Costo de Compra Unitario ($)", min_value=0.0)
             stock_ini = col_e.number_input("Stock Inicial (si ya tenés)", min_value=0, step=1)
             
-            st.markdown("**Datos de la Caja / Pack (Opcional)**")
-            col_f, col_g = st.columns(2)
-            unid_caja = col_f.number_input("Unidades por Caja/Bulto", min_value=1, value=1)
-            precio_caja = col_g.number_input("Precio por Caja Completa ($)", min_value=0.0)
-
-            # Guardamos el estado del botón en una variable
+            st.markdown("**Datos del Pack / Bulto**")
+            # Dejamos sola la columna de unidades, sacamos el input de precio caja
+            unid_caja = st.number_input("Unidades por Caja/Bulto", min_value=1, value=1)
+            
+            # Botón de envío
             enviado = st.form_submit_button("🚀 CREAR PRODUCTO")
 
             if enviado:
-                # --- ACÁ ESTÁ EL PATOVICA ---
                 if not nombre_prod:
                     st.error("⚠️ ¡Falta el nombre! Escribí algo antes de guardar.")
                 
                 elif precio_vta <= 0:
-                    st.warning("⚠️ ¡Ojo! El precio está en $0. Poné un precio real antes de darle Enter.")
+                    st.warning("⚠️ ¡Ojo! El precio está en $0. Poné un precio real.")
                 
                 else:
-                    # Si pasó los filtros, recién ahí guardamos
+                    # --- CÁLCULO AUTOMÁTICO DEL PRECIO CAJA ---
+                    # Multiplicamos el precio unitario por la cantidad que trae la caja
+                    precio_caja_calculado = precio_vta * unid_caja
+
                     try:
                         with engine.begin() as conn:
-                            # 1. Insertamos el producto
+                            # 1. Insertamos el producto (usamos la variable calculada)
                             conn.execute(text("""
                                 INSERT INTO productos 
                                 (nombre, id_marca, precio_venta, precio_costo_promedio, stock_actual, unidades_por_caja, precio_venta_caja)
                                 VALUES (:nom, :m, :pv, :pc, :stk, :upc, :pvc)
                             """), {
                                 "nom": nombre_prod, "m": id_marca_sel, "pv": precio_vta, 
-                                "pc": costo_ref, "stk": stock_ini, "upc": unid_caja, "pvc": precio_caja
+                                "pc": costo_ref, "stk": stock_ini, "upc": unid_caja, 
+                                "pvc": precio_caja_calculado  # <--- ACÁ VA EL CÁLCULO
                             })
                             
-                            # 2. Movimiento inicial
+                            # 2. Movimiento inicial si hay stock
                             if stock_ini > 0:
                                 id_new = conn.execute(text("SELECT MAX(id_producto) FROM productos")).fetchone()[0]
                                 conn.execute(text("""
@@ -1747,8 +1748,8 @@ with tab7:
                                     VALUES (:id, 'STOCK_INICIAL', :cant, NOW())
                                 """), {"id": id_new, "cant": stock_ini})
 
-                        st.success(f"✅ ¡Joya! Producto '{nombre_prod}' guardado correctamente.")
-                        time.sleep(0.5)
+                        st.success(f"✅ Producto '{nombre_prod}' creado. (Precio Caja autocalculado: ${precio_caja_calculado:,.2f})")
+                        time.sleep(1.5) # Un poquito más de tiempo para que lean el precio calculado
                         st.rerun()
                     except Exception as e:
                         st.error(f"Hubo un error al crear: {e}")
