@@ -529,6 +529,9 @@ with tab2:
         col_t3.metric("Margen", f"{margen_total:.1f}%", delta="Ganancia" if margen_total > 0 else "Pérdida")
 
         with st.form("form_finalizar_venta"):
+            st.write("📝 Datos de la Operación")
+            
+            # Fila 1: Factura y Cliente
             col_f, col_c = st.columns(2)
             nro_fac = col_f.text_input("N° de Factura / Ticket")
             cliente_sel = col_c.selectbox(
@@ -537,26 +540,38 @@ with tab2:
                 format_func=lambda x: clientes[clientes['id_cliente']==x]['razon_social'].values[0]
             )
             
+            # Fila 2: NUEVO CAMPO DE DESCRIPCIÓN (Para poner el nombre del consumidor final, etc)
+            descripcion_venta = st.text_input(
+                "Observaciones / Nombre Cliente (Opcional)", 
+                placeholder="Ej: Juan Pérez, Retira mañana, etc..."
+            )
+            
             if st.form_submit_button("🚀 Confirmar Venta Completa", width='stretch'):
                 try:
                     with engine.begin() as conn:
+                        # 1. Creamos la cabecera de la venta
                         res = conn.execute(text("""
                             INSERT INTO ventas (id_cliente, total_venta, nro_factura) 
                             VALUES (:id_c, :total, :fac) RETURNING id_venta
                         """), {"id_c": cliente_sel, "total": float(total_venta_final), "fac": nro_fac})
+                        
                         id_v_new = res.fetchone()[0]
                         
+                        # 2. Guardamos cada producto con la descripción nueva
                         for item in st.session_state.carrito_venta:
-                            # SIEMPRE guardamos precio por UNIDAD
                             conn.execute(text("""
-                                INSERT INTO detalle_ventas (id_venta, id_producto, formato_venta, cantidad_formato, precio_unitario_historico)
-                                VALUES (:id_v, :id_p, :formato, :cant, :precio)
+                                INSERT INTO detalle_ventas (
+                                    id_venta, id_producto, formato_venta, 
+                                    cantidad_formato, precio_unitario_historico, descripcion
+                                )
+                                VALUES (:id_v, :id_p, :formato, :cant, :precio, :desc)
                             """), {
                                 "id_v": id_v_new, 
                                 "id_p": item['id_producto'], 
                                 "formato": item['Formato'], 
                                 "cant": item['Cantidad'], 
-                                "precio": float(item['PrecioUnidad'])
+                                "precio": float(item['PrecioUnidad']),
+                                "desc": descripcion_venta # <--- ACÁ SE GUARDA LO QUE ESCRIBISTE
                             })
                     
                     st.success(f"✅ ¡Venta N° {id_v_new} registrada! Margen: {margen_total:.1f}% (${total_venta_final - costo_total:,.2f})")
@@ -1090,12 +1105,13 @@ with tab4:
                                         # ACÁ TAMBIÉN USAMOS EL PRECIO EDITADO
                                         conn.execute(text("""
                                             INSERT INTO detalle_ventas (id_venta, id_producto, formato_venta, cantidad_formato, precio_unitario_historico, es_concesion)
-                                            VALUES (:idv, :idp, 'Unidad', :cant, :precio, TRUE)
+                                            VALUES (:idv, :idp, 'Unidad', :cant, :precio, desc, TRUE)
                                         """), {
                                             "idv": id_v_new,
                                             "idp": row['id_producto'],
                                             "cant": cant_gest,
-                                            "precio": precio_final  # <--- Usamos el manual
+                                            "precio": precio_final,
+                                            "desc": descripcion_venta# <--- Usamos el manual
                                         })
                                         msg = f"✅ ¡Cobrado! {cant_gest} un. a ${precio_final:,.2f} c/u. Total: ${total_operacion:,.2f}"
 
