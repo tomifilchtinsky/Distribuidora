@@ -528,36 +528,50 @@ with tab2:
         col_t2.metric("Costo Total", f"${costo_total:,.2f}")
         col_t3.metric("Margen", f"{margen_total:.1f}%", delta="Ganancia" if margen_total > 0 else "Pérdida")
 
+        # ==============================================================================
+        # BLOQUE DE FINALIZAR VENTA CON PAGO Y DESCRIPCION
+        # ==============================================================================
         with st.form("form_finalizar_venta"):
             st.write("📝 Datos de la Operación")
             
-            # Fila 1: Factura y Cliente
-            col_f, col_c = st.columns(2)
-            nro_fac = col_f.text_input("N° de Factura / Ticket")
+            # Fila 1: Factura, Cliente y PAGO (Nuevo)
+            col_f, col_c, col_p = st.columns([1, 2, 1])
+            
+            nro_fac = col_f.text_input("N° Comp.", placeholder="Opcional")
+            
             cliente_sel = col_c.selectbox(
                 "Cliente", 
                 options=clientes['id_cliente'].tolist(), 
                 format_func=lambda x: clientes[clientes['id_cliente']==x]['razon_social'].values[0]
             )
             
-            # Fila 2: NUEVO CAMPO DE DESCRIPCIÓN (Para poner el nombre del consumidor final, etc)
+            # ACÁ ESTÁ LO NUEVO: Selector de Pago
+            tipo_pago = col_p.selectbox("Medio de Pago", ["Efectivo", "Transferencia", "Cta. Cte.", "Otro"])
+            
+            # Fila 2: Descripción (lo que agregamos antes)
             descripcion_venta = st.text_input(
                 "Observaciones / Nombre Cliente (Opcional)", 
-                placeholder="Ej: Juan Pérez, Retira mañana, etc..."
+                placeholder="Ej: Retira Juan, Seña 50%, etc..."
             )
             
-            if st.form_submit_button("🚀 Confirmar Venta Completa", width='stretch'):
+            # Botón de Confirmar
+            if st.form_submit_button("🚀 Confirmar Venta", width='stretch'):
                 try:
                     with engine.begin() as conn:
-                        # 1. Creamos la cabecera de la venta
+                        # 1. INSERTAR EN VENTAS (CABECERA) AGREGANDO EL PAGO
                         res = conn.execute(text("""
-                            INSERT INTO ventas (id_cliente, total_venta, nro_factura) 
-                            VALUES (:id_c, :total, :fac) RETURNING id_venta
-                        """), {"id_c": cliente_sel, "total": float(total_venta_final), "fac": nro_fac})
+                            INSERT INTO ventas (id_cliente, total_venta, nro_factura, metodo_pago) 
+                            VALUES (:id_c, :total, :fac, :pago) RETURNING id_venta
+                        """), {
+                            "id_c": cliente_sel, 
+                            "total": float(total_venta_final), 
+                            "fac": nro_fac,
+                            "pago": tipo_pago  # <--- Pasamos el dato nuevo
+                        })
                         
                         id_v_new = res.fetchone()[0]
                         
-                        # 2. Guardamos cada producto con la descripción nueva
+                        # 2. Guardamos los productos (Detalle)
                         for item in st.session_state.carrito_venta:
                             conn.execute(text("""
                                 INSERT INTO detalle_ventas (
@@ -571,15 +585,15 @@ with tab2:
                                 "formato": item['Formato'], 
                                 "cant": item['Cantidad'], 
                                 "precio": float(item['PrecioUnidad']),
-                                "desc": descripcion_venta # <--- ACÁ SE GUARDA LO QUE ESCRIBISTE
+                                "desc": descripcion_venta
                             })
                     
-                    st.success(f"✅ ¡Venta N° {id_v_new} registrada! Margen: {margen_total:.1f}% (${total_venta_final - costo_total:,.2f})")
+                    st.success(f"✅ Venta N° {id_v_new} ({tipo_pago}) registrada correctamente.")
                     st.session_state.carrito_venta = []
                     st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Ocurrió un error: {e}")
 
         if st.button("🗑️ Vaciar Pedido"):
             st.session_state.carrito_venta = []
