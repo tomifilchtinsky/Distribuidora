@@ -1461,21 +1461,20 @@ with tab5:
                 }
             )
 # ==========================================================
-# TAB 6: AUDITORÍA
+# TAB 6: AUDITORÍA (VERSIÓN FINAL CORREGIDA)
 # ==========================================================
 with tab6:
     st.title("🔍 Auditoría de Movimientos")
-    
-    st.info("💡 Esta sección te muestra todos los movimientos de stock registrados automáticamente por el sistema.")
-    
-    # Filtros
+    st.info("💡 Esta sección cruza tus movimientos históricos con el stock real para detectar fugas o errores.")
+
+    # --- 1. FILTROS ---
     col_f1, col_f2 = st.columns(2)
-    
     with col_f1:
-        dias_auditoria = st.selectbox("Mostrar últimos", [7, 15, 30, 60, 90], index=2, key="dias_audit")
-    
-    # Query de auditoría (Lista general)
-    query_audit = text("""
+        dias_auditoria = st.selectbox("Analizar últimos días", [7, 15, 30, 60, 90, 365], index=2, key="dias_audit")
+
+    # --- 2. TABLA DE MOVIMIENTOS CRUDOS ---
+    # Usamos f-string para inyectar los días de forma segura
+    query_audit = text(f"""
         SELECT 
             im.id_movimiento AS "N° Mov",
             TO_CHAR(im.fecha, 'DD/MM/YY HH24:MI') AS "Fecha/Hora",
@@ -1483,166 +1482,100 @@ with tab6:
             m.nombre AS "Marca",
             im.tipo AS "Tipo",
             im.cantidad AS "Cantidad",
-            p.stock_actual AS "Stock Actual"
+            p.stock_actual AS "Stock Depósito"
         FROM inventario_movimientos im
         JOIN productos p ON im.id_producto = p.id_producto
         JOIN marcas m ON p.id_marca = m.id_marca
-        WHERE im.fecha >= CURRENT_DATE - INTERVAL ':dias days'
+        WHERE im.fecha >= CURRENT_DATE - INTERVAL '{dias_auditoria} days'
         ORDER BY im.fecha DESC
         LIMIT 500
     """)
     
     with engine.connect() as conn:
-        df_audit = pd.read_sql(query_audit.bindparams(dias=dias_auditoria), conn)
+        df_audit = pd.read_sql(query_audit, conn)
     
-    if len(df_audit) > 0:
-        # Filtro por tipo
+    if not df_audit.empty:
+        # Filtro por tipo visual
         with col_f2:
             tipos_disponibles = ['Todos'] + df_audit['Tipo'].unique().tolist()
             tipo_filtro = st.selectbox("Filtrar por tipo", tipos_disponibles)
         
         df_mostrar = df_audit if tipo_filtro == 'Todos' else df_audit[df_audit['Tipo'] == tipo_filtro]
         
-        # Resumen numérico
-        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-        
-        compras = len(df_audit[df_audit['Tipo'] == 'COMPRA'])
-        ventas = len(df_audit[df_audit['Tipo'] == 'VENTA'])
-        cancelaciones = len(df_audit[df_audit['Tipo'].str.contains('CANCELACIÓN')])
-        
-        col_s1.metric("Total Movimientos", len(df_audit))
-        col_s2.metric("Compras", compras)
-        col_s3.metric("Ventas", ventas)
-        col_s4.metric("Cancelaciones", cancelaciones)
-        
-        st.markdown("---")
-        
-        # Tabla de auditoría
-        st.dataframe(
-            df_mostrar,
-            width='stretch',
-            hide_index=True,
-            column_config={
-                "Cantidad": st.column_config.NumberColumn(format="%d")
-            }
-        )
-        
-        st.markdown("---")
+        # Métricas rápidas
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Registros", len(df_mostrar))
+        col2.metric("Entradas", len(df_mostrar[df_mostrar['Cantidad'] > 0]))
+        col3.metric("Salidas", len(df_mostrar[df_mostrar['Cantidad'] < 0]))
 
-        # ==============================================================================
-        # ACÁ EMPIEZA EL GRÁFICO NUEVO (Reemplazamos el gráfico simple por el APILADO)
-        # ==============================================================================
-        st.subheader("🕵️ Análisis de Calidad de Movimientos")
-        st.caption("Este gráfico desglosa si el movimiento es venta real (Verde) o logística de ida y vuelta (Amarillo/Naranja).")
-
-        # 1. Consulta SQL Inteligente: Agrupa por Tipo y Producto
-        query_audit_stack = text("""
-            SELECT 
-                p.nombre as "Producto",
-                CASE 
-                    WHEN im.tipo = 'VENTA' THEN 'Venta Directa'
-                    WHEN im.tipo = 'VENTA_CONCESION' THEN 'Venta (Concesión)'
-                    WHEN im.tipo = 'COMPRA' THEN 'Reposición (Compra)'
-                    WHEN im.tipo = 'ENTREGA_CONCESION' THEN 'Entrega a Local'
-                    WHEN im.tipo = 'DEVOLUCION_CONCESION' THEN 'Devolución de Local'
-                    ELSE im.tipo 
-                END as "Operación",
-                SUM(ABS(im.cantidad)) as "Volumen"
-            FROM inventario_movimientos im
-            JOIN productos p ON im.id_producto = p.id_producto
-            GROUP BY p.nombre, im.tipo
-        """)
-        
-        with engine.connect() as conn:
-            df_stack = pd.read_sql(query_audit_stack, conn)
-        
-        if not df_stack.empty:
-            # 2. Filtro: Nos quedamos solo con los 10 productos que más se mueven en TOTAL
-            ranking_productos = df_stack.groupby('Producto')['Volumen'].sum().nlargest(10).index
-            df_final_stack = df_stack[df_stack['Producto'].isin(ranking_productos)]
-            
-            # 3. El Gráfico Revelador
-            fig_audit = px.bar(
-                df_final_stack, 
-                x="Producto", 
-                y="Volumen", 
-                color="Operación",
-                title="Top 10 Productos con Mayor Tráfico Logístico",
-                text_auto=True,
-                # Colores Semánticos
-                color_discrete_map={
-                    "Venta Directa": "#2ecc71",       # Verde Claro
-                    "Venta (Concesión)": "#27ae60",   # Verde Oscuro
-                    "Reposición (Compra)": "#3498db", # Azul
-                    "Entrega a Local": "#f1c40f",     # Amarillo
-                    "Devolución de Local": "#e67e22"  # Naranja
-                }
-            )
-            
-            fig_audit.update_layout(
-                barmode='stack', 
-                xaxis={'categoryorder':'total descending'}, 
-                yaxis_title="Unidades Movidas (Absoluto)",
-                legend_title_text="Tipo de Movimiento"
-            )
-            
-            st.plotly_chart(fig_audit, width='stretch')
-        else:
-            st.info("Aún no hay suficientes datos para generar el gráfico de auditoría.")
-        # ==============================================================================
-        # FIN DEL GRÁFICO NUEVO
-        # ==============================================================================
-        
+        st.dataframe(df_mostrar, width='stretch', hide_index=True)
     else:
-        st.warning(f"No hay movimientos registrados en los últimos {dias_auditoria} días.")
-    
-    # Sección de inconsistencias (CORREGIDA PARA CONCESIONES)
+        st.warning("No hay movimientos en este período.")
+
     st.markdown("---")
-    st.subheader("⚠️ Verificación de Integridad")
-    
-    # Esta query ahora es más inteligente: suma todo movimiento positivo y resta negativo
-    query_inconsistencias = text("""
-        SELECT 
-            p.nombre AS "Producto",
-            p.stock_actual AS "Stock Actual",
-            -- CORRECCIÓN: Excluimos 'VENTA_CONCESION' porque eso descuenta stock del cliente, no del galpón.
-            COALESCE(SUM(CASE WHEN im.tipo != 'VENTA_CONCESION' THEN im.cantidad ELSE 0 END), 0) AS "Stock Calculado", 
+
+    # --- 3. AUDITORÍA DE INTEGRIDAD (EL FIX IMPORTANTE) ---
+    st.subheader("👮 Auditoría de Stock (Real vs. Calculado)")
+    st.caption("Comparamos lo que dice la Base de Datos (Físico + Concesión) contra la suma histórica de movimientos.")
+
+    if st.button("🔄 Ejecutar Auditoría Profunda"):
+        with engine.connect() as conn:
+            # A) Traemos el STOCK REAL de la base (Lo que el sistema cree que hay hoy)
+            # ACÁ ESTÁ LA CLAVE: Traemos 'stock_concesion'
+            stock_real = pd.read_sql(text("""
+                SELECT 
+                    id_producto, 
+                    nombre, 
+                    stock_actual as "Físico", 
+                    stock_concesion as "Concesión"
+                FROM productos
+            """), conn)
             
-            -- Desglose visual
-            COALESCE(SUM(CASE WHEN im.tipo = 'COMPRA' THEN im.cantidad ELSE 0 END), 0) AS "Compras",
-            COALESCE(SUM(CASE WHEN im.tipo = 'VENTA' THEN ABS(im.cantidad) ELSE 0 END), 0) AS "Ventas",
-            -- Mostramos entregas netas (Entregas - Devoluciones) para que se entienda mejor
-            COALESCE(SUM(CASE WHEN im.tipo = 'ENTREGA_CONCESION' THEN ABS(im.cantidad) ELSE 0 END), 0) 
-            - COALESCE(SUM(CASE WHEN im.tipo = 'DEVOLUCION_CONCESION' THEN ABS(im.cantidad) ELSE 0 END), 0) AS "En Concesión (Neto)"
-        FROM productos p
-        LEFT JOIN inventario_movimientos im ON p.id_producto = im.id_producto
-        GROUP BY p.id_producto, p.nombre, p.stock_actual
-        HAVING COUNT(im.id_movimiento) > 0
-    """)
-    
-    with engine.connect() as conn:
-        df_verif = pd.read_sql(query_inconsistencias, conn)
-    
-    if len(df_verif) > 0:
-        # El "Stock Calculado" viene de sumar (+Compras -Ventas -Concesiones) directo de la base
-        df_verif['Diferencia'] = df_verif['Stock Actual'] - df_verif['Stock Calculado']
+            # B) Calculamos el STOCK HISTÓRICO (Suma de todos los movimientos desde el origen de los tiempos)
+            movimientos = pd.read_sql(text("""
+                SELECT 
+                    id_producto, 
+                    SUM(cantidad) as "Calculado"
+                FROM inventario_movimientos
+                GROUP BY id_producto
+            """), conn)
         
-        # Mostrar solo si hay diferencias
-        df_problemas = df_verif[df_verif['Diferencia'] != 0]
+        # C) Unimos las tablas (Excel VLOOKUP style)
+        df_audit_final = pd.merge(stock_real, movimientos, on="id_producto", how="left")
         
-        if len(df_problemas) > 0:
-            st.error(f"⚠️ Se encontraron {len(df_problemas)} inconsistencias graves")
-            # Mostramos el desglose para que entiendas dónde está el lío
+        # Rellenamos con 0 si no hubo movimientos
+        df_audit_final['Calculado'] = df_audit_final['Calculado'].fillna(0).astype(int)
+        
+        # D) Lógica de Validación:
+        # El stock total real es la suma de lo que tengo en el galpón + lo que presté
+        df_audit_final['Total Real'] = df_audit_final['Físico'] + df_audit_final['Concesión']
+        
+        # La diferencia es el Real menos el Histórico
+        df_audit_final['Diferencia'] = df_audit_final['Total Real'] - df_audit_final['Calculado']
+        
+        # Filtramos solo los que dan mal
+        df_problemas = df_audit_final[df_audit_final['Diferencia'] != 0].copy()
+        
+        if not df_problemas.empty:
+            st.error(f"⚠️ Se encontraron {len(df_problemas)} inconsistencias de stock.")
+            
+            # Mostramos la tabla del terror
             st.dataframe(
-                df_problemas[['Producto', 'Stock Actual', 'Stock Calculado', 'Diferencia', 'Compras', 'Ventas', 'En Concesión']],
+                df_problemas[['nombre', 'Físico', 'Concesión', 'Total Real', 'Calculado', 'Diferencia']],
                 width='stretch',
                 hide_index=True
             )
+            st.markdown("""
+            **Guía de solución:**
+            * Si **Diferencia < 0**: Falta mercadería (posible robo o venta no cargada).
+            * Si **Diferencia > 0**: Sobra mercadería (posible compra no cargada o devolución mal hecha).
+            """)
         else:
-            st.success("✅ ¡Cierre Perfecto! El stock físico coincide con todos los movimientos (incluyendo concesiones).")
-    else:
-        st.info("No hay suficiente información para verificar integridad")
-        
+            st.balloons()
+            st.success("✅ ¡PERFECTO! La contabilidad de stock cierra exacta (0 errores).")
+            st.write("El stock en depósito + el stock prestado coincide exactamente con el historial de movimientos.")
+            
+            
     # ==========================================================
 # TAB 7: PANEL DE CONTROL Y ALTAS (PARA QUE CARGUEN ELLOS)
 # ==========================================================
